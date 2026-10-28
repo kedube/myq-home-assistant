@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.2.7 (2026-10-28)
+
+### Chores
+
+- Trigger corrected release
+  ([`49821fa`](https://github.com/kedube/myq-home-assistant/commit/49821fa194ae16aa6baf506980ce8d5004eb47f6))
+
+
 ## v0.0.1 (2026-10-28)
 
 ### Bug Fixes
