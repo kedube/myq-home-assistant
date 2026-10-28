@@ -19,6 +19,8 @@ The integration provides:
 - a door-open binary sensor for Alarmo and other sensor-based automations;
 - vacation mode, work-light, fault, cycle-count, and activation diagnostics
   when provided by MyQ;
+- camera snapshots from openers with a built-in MyQ camera, captured when
+  Home Assistant requests an image;
 - cloud polling every 30 seconds.
 
 ## Alarmo
@@ -78,6 +80,14 @@ The password is used only during sign-in and is not stored. Home Assistant
 stores the issued OAuth tokens in the config entry and refreshes them
 automatically. If MyQ rejects token refresh or account access, Home Assistant
 requests reauthentication.
+
+### Camera diagnostics
+
+After setting up the integration, open **Developer Tools → States** and select
+the garage camera entity. Its `camera_serial_prefix` and `model_name` attributes
+help identify the camera generation without exposing its full serial number. The
+camera entity currently retrieves still images; live video requires a
+compatible stream protocol.
 
 ## Safety
 
