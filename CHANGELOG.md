@@ -2,6 +2,113 @@
 
 <!-- version list -->
 
+## v0.0.1 (2026-10-28)
+
+### Bug Fixes
+
+- Add HACS metadata
+  ([`10735b5`](https://github.com/kedube/myq-home-assistant/commit/10735b5ebc55db74c538464afba6ff3c1b4025fc))
+
+- Add high-resolution MyQ icon
+  ([`f37f18a`](https://github.com/kedube/myq-home-assistant/commit/f37f18a18be1ab832399f464be677d9c7b7e9c44))
+
+- Clarify verification code prompt
+  ([`a5e8b5d`](https://github.com/kedube/myq-home-assistant/commit/a5e8b5d6463ffd7426a536948946f0836966af5e))
+
+- Detach login HTTP session
+  ([`f268cb5`](https://github.com/kedube/myq-home-assistant/commit/f268cb50092c431b8a3ee4873858ba7d8164fe24))
+
+- Explain how to recover browser callback
+  ([`388672d`](https://github.com/kedube/myq-home-assistant/commit/388672d49be79f50bea47acf93a98747ed1d1409))
+
+- Improve identity page diagnostics
+  ([`14e2b13`](https://github.com/kedube/myq-home-assistant/commit/14e2b13c02dbf95b33c479f911d1f2c6fc9ecfb7))
+
+- Preserve entities when a garage door is missing
+  ([`8f8d877`](https://github.com/kedube/myq-home-assistant/commit/8f8d8770fd939d2f27ebc60bb99ffee0b3bc3d62))
+
+- Publish HACS release archive
+  ([`a9b1d31`](https://github.com/kedube/myq-home-assistant/commit/a9b1d311eb52935fb347ea04853c013594903051))
+
+- Refresh browser authentication headers
+  ([`cce100b`](https://github.com/kedube/myq-home-assistant/commit/cce100b1058c670edaa6196ed61f49189a68b370))
+
+- Send browser headers on authorization
+  ([`89069f3`](https://github.com/kedube/myq-home-assistant/commit/89069f31ef5b5a422346062fcc77fd5f4920e6e4))
+
+- Tolerate MyQ authentication form variations
+  ([`1f0f453`](https://github.com/kedube/myq-home-assistant/commit/1f0f45373bdc323ca0571a5055ec024e6d67ae99))
+
+### Chores
+
+- Add Ko-fi funding
+  ([`cc128d8`](https://github.com/kedube/myq-home-assistant/commit/cc128d8002db999f64e9194583d7658aeec356b3))
+
+- Trigger release workflow
+  ([`1232f72`](https://github.com/kedube/myq-home-assistant/commit/1232f721f8dafa90a9ba2077dbdf88a3f084f98d))
+
+### Continuous Integration
+
+- Publish a patch release on every main push
+  ([`833a562`](https://github.com/kedube/myq-home-assistant/commit/833a562de9bc4c18dd43415713f908690f02d4e3))
+
+### Documentation
+
+- Add Home Assistant quick links
+  ([`2af18f5`](https://github.com/kedube/myq-home-assistant/commit/2af18f59c8e9fa84bc265f39771f011fe0f15786))
+
+- Add Ko-fi support button
+  ([`c285715`](https://github.com/kedube/myq-home-assistant/commit/c28571514d4e26b9e327b592b423ffc30c0d2ff9))
+
+### Features
+
+- Add browser authentication fallback
+  ([`704717e`](https://github.com/kedube/myq-home-assistant/commit/704717ed8844d06584cbc7c24c923930dff2a01b))
+
+- Add garage door state sensor for Alarmo
+  ([`5b97320`](https://github.com/kedube/myq-home-assistant/commit/5b97320a1116b3c378edc065b636c00a295e6d83))
+
+- Add MyQ integration
+  ([`9e8b989`](https://github.com/kedube/myq-home-assistant/commit/9e8b989474694e88a149f3155e0b531779ac3a4e))
+
+- Expose browser sign-in option
+  ([`c658c71`](https://github.com/kedube/myq-home-assistant/commit/c658c71cc04e5f22178ab8020a5e54f99d8be9bc))
+
+### Refactoring
+
+- Centralize garage door motion state
+  ([`6425d6a`](https://github.com/kedube/myq-home-assistant/commit/6425d6a28d6b3045668ffda3d90cefb3c9d0e9b9))
+
+- Isolate MFA field selection
+  ([`f1754c0`](https://github.com/kedube/myq-home-assistant/commit/f1754c019abdbf7086c6d79e3f4576a62bfc2b3c))
+
+- Load embedded App Check profile
+  ([`586dd08`](https://github.com/kedube/myq-home-assistant/commit/586dd08fb9304aa4cdd603cbaf50a2a1b0cf3ee7))
+
+- Separate browser callback validation
+  ([`064a0cd`](https://github.com/kedube/myq-home-assistant/commit/064a0cdc7289f7c7ba68893a57080fb6cdbfd5d0))
+
+- Separate domain models from Home Assistant runtime
+  ([`c8200e7`](https://github.com/kedube/myq-home-assistant/commit/c8200e702ed143d871014429666afec0654fe45a))
+
+- Separate OAuth and sign-in page handling
+  ([`902d16a`](https://github.com/kedube/myq-home-assistant/commit/902d16af31207813a76b12eef2806e8df3d10769))
+
+- Share credential flow handling
+  ([`ffc50e7`](https://github.com/kedube/myq-home-assistant/commit/ffc50e7a496f240024e6ec9a9c82092f85541b40))
+
+- Share garage door command execution
+  ([`57b3091`](https://github.com/kedube/myq-home-assistant/commit/57b309155b47e68381e54be2b06e1f4ae31f125f))
+
+- Share HTTP test support
+  ([`9ad5308`](https://github.com/kedube/myq-home-assistant/commit/9ad5308a2b9031117fe5db1fa576516e979c8631))
+
+### Testing
+
+- Cover token refresh failures and recovery
+  ([`aee905d`](https://github.com/kedube/myq-home-assistant/commit/aee905db3d8ca72fbaaddaf7aac003910d95bc76))
+
+
 ## v0.2.6 (2026-10-09)
 
 ### Refactoring
