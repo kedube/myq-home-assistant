@@ -1,5 +1,5 @@
 from aiohttp import ClientError
-from homeassistant.components.camera import Camera
+from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -10,6 +10,7 @@ from .entity import MyQEntity
 from .exceptions import MyQError
 from .models import GarageDoor, MyQCamera
 from .runtime import MyQConfigEntry
+from .tend_stream import TendLiveStream
 
 # Each snapshot is captured on demand and takes over a second, so MJPEG previews stay slow.
 SNAPSHOT_FRAME_INTERVAL = 5.0
@@ -37,6 +38,14 @@ class MyQGarageCamera(MyQEntity, Camera):
         super().__init__(coordinator, door)
         Camera.__init__(self)
         self._attr_unique_id = f"{door.serial_number}_camera"
+        self._live_stream: TendLiveStream | None = None
+        if door.camera is not None and door.camera.serial_prefix == "TC":
+            self._attr_supported_features = CameraEntityFeature.STREAM
+            self.stream_options = {"use_wallclock_as_timestamps": True}
+            self._live_stream = TendLiveStream(
+                door.camera.serial_number,
+                coordinator.client.async_access_token,
+            )
 
     @property
     def camera(self) -> MyQCamera | None:
@@ -76,3 +85,15 @@ class MyQGarageCamera(MyQEntity, Camera):
                 translation_domain=DOMAIN,
                 translation_key="camera_image_failed",
             ) from error
+
+    async def stream_source(self) -> str | None:
+        """Expose the TC camera's H.264 feed to Home Assistant's stream integration."""
+        if not self.available or self._live_stream is None:
+            return None
+        return await self._live_stream.source_url()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Release the local stream listener and the Tend camera session."""
+        if self._live_stream is not None:
+            await self._live_stream.close()
+        await super().async_will_remove_from_hass()

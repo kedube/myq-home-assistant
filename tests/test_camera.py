@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import ClientConnectionError
-from homeassistant.components.camera import async_get_image
+from homeassistant.components.camera import CameraEntityFeature, async_get_image
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -46,6 +46,20 @@ async def test_camera_returns_snapshot_for_attached_camera() -> None:
     assert entity.unique_id == "door-1_camera"
     assert entity.extra_state_attributes == {"camera_serial_prefix": "TC"}
     assert entity.model == "Integrated camera"
+    assert entity.supported_features == CameraEntityFeature.STREAM
+
+
+async def test_live_stream_is_available_only_for_tc_camera() -> None:
+    tc_entity, _ = _entity(DOOR)
+    with patch.object(tc_entity._live_stream, "source_url", new_callable=AsyncMock) as source:
+        source.return_value = "http://127.0.0.1:1234/private.h264"
+        assert await tc_entity.stream_source() == source.return_value
+        source.assert_awaited_once()
+
+    other = replace(DOOR, camera=MyQCamera("GW-0005-10000001", True))
+    other_entity, _ = _entity(other)
+    assert other_entity.supported_features == 0
+    assert await other_entity.stream_source() is None
 
 
 @pytest.mark.parametrize("error_type", [MyQApiError, MyQAuthenticationError, ClientConnectionError])

@@ -85,9 +85,15 @@ requests reauthentication.
 
 After setting up the integration, open **Developer Tools → States** and select
 the garage camera entity. Its `camera_serial_prefix` and `model_name` attributes
-help identify the camera generation without exposing its full serial number. The
-camera entity currently retrieves still images; live video requires a
-compatible stream protocol.
+help identify the camera generation without exposing its full serial number.
+Camera entities with the `TC` serial prefix also expose an experimental live H.264 video feed
+through Home Assistant's stream integration. Live video needs Home Assistant to
+reach the camera on the same local network; snapshots continue to use MyQ's
+cloud endpoint. Each TC camera accepts one direct live session, which this
+integration shares among Home Assistant viewers. Opening the live view in the
+myQ app at the same time can interrupt the Home Assistant feed.
+If live video fails to start, check the Home Assistant log for
+`TC camera live video unavailable` and include that message in a bug report.
 
 ## Safety
 
