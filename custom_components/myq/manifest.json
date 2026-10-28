@@ -1,10 +1,10 @@
 {
   "domain": "myq",
   "name": "MyQ",
+  "after_dependencies": ["stream"],
   "codeowners": ["@bvdcode"],
   "config_flow": true,
   "documentation": "https://github.com/bvdcode/myq-home-assistant",
-  "dependencies": ["stream"],
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/bvdcode/myq-home-assistant/issues",

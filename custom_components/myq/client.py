@@ -75,11 +75,14 @@ class MyQClient:
 
     async def async_get_camera_image(self, camera: MyQCamera) -> bytes:
         """Return a JPEG frame captured by the camera for this request."""
-        return await self._async_request(
+        image = await self._async_request(
             "GET",
             f"{TEND_API_BASE_URL}/devices/{camera.tend_device_id}/cam/recentImage.jpg",
             _tend_headers,
         )
+        if not image.startswith(b"\xff\xd8"):
+            raise MyQApiError("Tend returned a camera snapshot that is not a JPEG")
+        return image
 
     async def _async_get_account_doors(
         self,

@@ -7,7 +7,11 @@ import contextlib
 import logging
 import secrets
 from collections.abc import Awaitable, Callable
+from typing import Any
 
+from aiohttp import ClientError
+
+from .exceptions import MyQError
 from .tend import (
     CxsConnection,
     TendCamera,
@@ -25,18 +29,11 @@ _IDLE_SECONDS = 60
 def _nals(data: bytes) -> list[tuple[int, bytes]]:
     """Return the H.264 NAL units in one Annex B access unit."""
     starts: list[tuple[int, int]] = []
-    index = 0
-    while index + 3 < len(data):
-        start = 0
-        if data[index : index + 3] == b"\x00\x00\x01":
-            start = 3
-        elif data[index : index + 4] == b"\x00\x00\x00\x01":
-            start = 4
-        if start:
-            starts.append((index, start))
-            index += start
-        else:
-            index += 1
+    index = data.find(b"\x00\x00\x01")
+    while index != -1:
+        # A zero before the 3-byte start code makes it the 4-byte form.
+        starts.append((index - 1, 4) if index and data[index - 1] == 0 else (index, 3))
+        index = data.find(b"\x00\x00\x01", index + 3)
     units: list[tuple[int, bytes]] = []
     for position, (start, prefix) in enumerate(starts):
         end = starts[position + 1][0] if position + 1 < len(starts) else len(data)
@@ -49,18 +46,39 @@ class _Viewer:
     def __init__(self) -> None:
         self.frames: asyncio.Queue[bytes] = asyncio.Queue(maxsize=60)
         self.ready = False
+        self.ended = False
 
     def put(self, frame: bytes) -> None:
+        if self.ended:
+            return
         if self.frames.full():
             self.frames.get_nowait()
         self.frames.put_nowait(frame)
+
+    def end(self) -> None:
+        """Queue the end marker; later frames cannot push it out of the queue."""
+        self.put(b"")
+        self.ended = True
+
+
+async def _stop_video(connection: CxsConnection, camera: TendCamera, offer: VideoOffer) -> None:
+    with contextlib.suppress(OSError, TendStreamError):
+        await connection.command(
+            f"stop-video-receive|{camera.device_id}|9|", camera.destination, offer.correlation
+        )
 
 
 class TendLiveStream:
     """Share one Tend session among Home Assistant stream consumers."""
 
-    def __init__(self, serial_number: str, token_supplier: Callable[[], Awaitable[str]]) -> None:
+    def __init__(
+        self,
+        serial_number: str,
+        opener_serial: str,
+        token_supplier: Callable[[], Awaitable[str]],
+    ) -> None:
         self.serial_number = serial_number
+        self._opener_serial = opener_serial
         self._token_supplier = token_supplier
         self._path = "/" + secrets.token_urlsafe(24) + ".h264"
         self._server: asyncio.Server | None = None
@@ -74,15 +92,19 @@ class TendLiveStream:
         self._idle_task: asyncio.Task[None] | None = None
         self._sps: bytes | None = None
         self._pps: bytes | None = None
+        self._close_task: asyncio.Task[None] | None = None
+        self._handlers: set[asyncio.Task[Any]] = set()
         self._closed = False
+
+    def _raise_if_closed(self) -> None:
+        if self._closed:
+            raise TendStreamError("Tend camera stream is closed")
 
     async def source_url(self) -> str:
         """Return an unguessable loopback URL for HA's FFmpeg stream reader."""
-        if self._closed:
-            raise TendStreamError("Tend camera stream is closed")
+        self._raise_if_closed()
         async with self._server_lock:
-            if self._closed:
-                raise TendStreamError("Tend camera stream is closed")
+            self._raise_if_closed()
             if self._server is None:
                 self._server = await asyncio.start_server(self._handle_client, "127.0.0.1", 0)
         address = self._server.sockets[0].getsockname()
@@ -92,14 +114,17 @@ class TendLiveStream:
         async with self._lock:
             if self._transport is not None:
                 return
-            connection = CxsConnection()
+            connection = CxsConnection(self._on_signaling_lost)
             transport: VideoTransport | None = None
             try:
                 await connection.login(await self._token_supplier())
-                cameras = parse_cameras(connection.properties)
-                camera_id = self.serial_number.rsplit("-", 1)[-1]
+                # Tend signaling lists cameras by account alias and MAC, not by serial number.
                 camera = next(
-                    (item for item in cameras if item.device_id in (camera_id, self.serial_number)),
+                    (
+                        item
+                        for item in parse_cameras(connection.properties)
+                        if item.opener_serial == self._opener_serial
+                    ),
                     None,
                 )
                 if camera is None:
@@ -114,6 +139,8 @@ class TendLiveStream:
                         last_error = error
                         transport.close()
                         transport = None
+                        # Release the camera's side of the failed offer before asking again.
+                        await _stop_video(connection, camera, offer)
                         if attempt == 0:
                             await asyncio.sleep(4)
                         continue
@@ -133,7 +160,7 @@ class TendLiveStream:
                     _LOGGER.debug("Connected Tend TC camera video")
                     return
                 raise last_error or TendStreamError("TC camera media connection failed")
-            except (OSError, TimeoutError, ValueError) as error:
+            except (ClientError, MyQError, OSError, TimeoutError, ValueError) as error:
                 raise TendStreamError("TC camera media connection failed") from error
             finally:
                 if self._transport is None:
@@ -162,14 +189,22 @@ class TendLiveStream:
                 viewer.ready = True
             viewer.put(frame)
 
+    def _on_signaling_lost(self, connection: CxsConnection) -> None:
+        """End viewers at once when Tend drops signaling, so they reconnect to a new session."""
+        if connection is not self._connection:
+            return
+        _LOGGER.warning("TC camera live video unavailable: Tend signaling closed")
+        for viewer in self._viewers:
+            viewer.end()
+        self._close_task = asyncio.create_task(self._close_session())
+
     async def _subscribe(self) -> _Viewer:
-        if self._closed:
-            raise TendStreamError("Tend camera stream is closed")
+        self._raise_if_closed()
         if self._idle_task is not None:
             self._idle_task.cancel()
             self._idle_task = None
         await self._open()
-        if bool(self._closed):
+        if self._closed:
             await self._close_session()
             raise TendStreamError("Tend camera stream is closed")
         viewer = _Viewer()
@@ -181,6 +216,9 @@ class TendLiveStream:
     ) -> None:
         viewer: _Viewer | None = None
         stalled = False
+        handler = asyncio.current_task()
+        if handler is not None:
+            self._handlers.add(handler)
         try:
             request = await asyncio.wait_for(reader.readline(), 5)
             if request != f"GET {self._path} HTTP/1.1\r\n".encode() and request != (
@@ -236,6 +274,8 @@ class TendLiveStream:
                         await self._close_session()
                     else:
                         self._idle_task = asyncio.create_task(self._idle_close())
+            if handler is not None:
+                self._handlers.discard(handler)
             writer.close()
             with contextlib.suppress(ConnectionError, OSError):
                 await writer.wait_closed()
@@ -258,12 +298,7 @@ class TendLiveStream:
             self._camera = None
             self._offer = None
             if connection is not None and camera is not None and offer is not None:
-                with contextlib.suppress(OSError, TendStreamError):
-                    await connection.command(
-                        f"stop-video-receive|{camera.device_id}|9|",
-                        camera.destination,
-                        offer.correlation,
-                    )
+                await _stop_video(connection, camera, offer)
             if self._transport is not None:
                 self._transport.close()
                 self._transport = None
@@ -273,12 +308,14 @@ class TendLiveStream:
             self._pps = None
 
     async def close(self) -> None:
-        """Stop accepting viewers and close the Tend session."""
+        """Stop accepting viewers, end connected ones, and close the Tend session."""
         self._closed = True
         if self._idle_task is not None:
             self._idle_task.cancel()
-        for viewer in self._viewers:
-            viewer.put(b"")
+        # Cancelling handlers also aborts a Tend login in progress, so unload never waits on it,
+        # and lets Server.wait_closed() finish even when a reader has stopped consuming.
+        for handler in self._handlers:
+            handler.cancel()
         async with self._server_lock:
             if self._server is not None:
                 self._server.close()

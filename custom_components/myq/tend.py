@@ -13,7 +13,6 @@ import logging
 import re
 import secrets
 import socket
-import ssl
 import struct
 import time
 from collections.abc import Callable
@@ -22,6 +21,9 @@ from uuid import uuid4
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.padding import PKCS7
+from homeassistant.util.ssl import client_context
+
+from .const import TEND_PARTNER_ID
 
 _LOGGER = logging.getLogger(__name__)
 _LOGIN_HOST = "server.tend-us.tendplatform.com"
@@ -29,6 +31,8 @@ _LOGIN_PORT = 5104
 _CXS_HEADER = 27
 _MAX_CXS_PACKET = 2 * 1024 * 1024
 _SDNK_MAGIC = b"SDNK"
+_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+_PROPERTY_SPACE = " \t\f"
 
 
 class TendStreamError(Exception):
@@ -95,59 +99,59 @@ def store_properties(values: dict[str, str]) -> bytes:
     return ("\n".join(lines) + "\n").encode("latin1")
 
 
+def _unescape_property(value: str) -> str:
+    return re.sub(
+        r"\\(u[0-9a-fA-F]{4}|.)",
+        lambda item: (
+            chr(int(item[1][1:], 16))
+            if item[1].startswith("u") and len(item[1]) == 5
+            else {"t": "\t", "n": "\n", "r": "\r", "f": "\f"}.get(item[1], item[1])
+        ),
+        value,
+    )
+
+
 def load_properties(data: bytes) -> dict[str, str]:
-    """Decode simple Java properties, including escaped continuation lines."""
-    text = data.decode("latin1")
+    """Decode Java properties: comments, continuations, separators, and escapes."""
     result: dict[str, str] = {}
-    logical = ""
-    for physical in text.splitlines():
-        logical += physical
-        if logical.endswith("\\") and not logical.endswith("\\\\"):
-            logical = logical[:-1]
-            continue
-        line = logical.strip()
-        logical = ""
+    lines = iter(_LINE_BREAK.split(data.decode("latin1")))
+    for physical in lines:
+        line = physical.lstrip(_PROPERTY_SPACE)
         if not line or line[0] in "#!":
             continue
-        match = re.search(r"(?<!\\)[=:\s]", line)
-        if match is None:
-            key, value = line, ""
-        else:
-            key = line[: match.start()]
-            value = line[match.end() :].lstrip(" =:")
-
-        def unescape(value: str) -> str:
-            return re.sub(
-                r"\\(u[0-9a-fA-F]{4}|.)",
-                lambda item: (
-                    chr(int(item[1][1:], 16))
-                    if item[1].startswith("u") and len(item[1]) == 5
-                    else {"t": "\t", "n": "\n", "r": "\r", "f": "\f"}.get(item[1], item[1])
-                ),
-                value,
-            )
-
-        result[unescape(key)] = unescape(value)
+        # An odd run of trailing backslashes continues the line; its leading space is dropped.
+        while (len(line) - len(line.rstrip("\\"))) % 2:
+            line = line[:-1] + next(lines, "").lstrip(_PROPERTY_SPACE)
+        key_end = 0
+        while key_end < len(line) and line[key_end] not in "=:" + _PROPERTY_SPACE:
+            key_end += 2 if line[key_end] == "\\" else 1
+        value = line[key_end:].lstrip(_PROPERTY_SPACE)
+        if value[:1] in ("=", ":"):
+            value = value[1:].lstrip(_PROPERTY_SPACE)
+        result[_unescape_property(line[:key_end])] = _unescape_property(value)
     return result
 
 
 class CxsConnection:
     """TLS signaling connection to the Tend camera broker."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_lost: Callable[[CxsConnection], None] | None = None) -> None:
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._options = bytes(16)
         self.properties: dict[str, str] = {}
         self._keepalive_task: asyncio.Task[None] | None = None
+        self._read_task: asyncio.Task[None] | None = None
+        self._replies: list[tuple[bytes, asyncio.Future[CxsPacket]]] = []
+        self._on_lost = on_lost
+        self._lost = False
 
     async def _connect(self, host: str) -> None:
         self.close_transport()
         try:
-            ssl_context = await asyncio.to_thread(ssl.create_default_context)
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(
-                    host, _LOGIN_PORT, ssl=ssl_context, server_hostname=_LOGIN_HOST
+                    host, _LOGIN_PORT, ssl=client_context(), server_hostname=_LOGIN_HOST
                 ),
                 10,
             )
@@ -155,12 +159,12 @@ class CxsConnection:
             raise TendStreamError("Tend signaling connection failed") from error
 
     async def _send(self, packet: CxsPacket) -> None:
-        if self._writer is None:
+        if self._writer is None or self._lost:
             raise TendStreamError("Tend signaling is disconnected")
         self._writer.write(encode_cxs_packet(packet))
         await self._writer.drain()
 
-    async def _next(self, wait_seconds: float = 10) -> tuple[CxsPacket, bytes]:
+    async def _next(self, wait_seconds: float | None = 10) -> tuple[CxsPacket, bytes]:
         reader = self._reader
         if reader is None:
             raise TendStreamError("Tend signaling is disconnected")
@@ -192,7 +196,7 @@ class CxsConnection:
         """Follow the front door redirect and authenticate with a broker."""
         source = store_properties(
             {
-                "partner-id": "myQ",
+                "partner-id": TEND_PARTNER_ID,
                 "CX_UNAME": "",
                 "client_type": "Python myqcam",
                 "sdk_version": "2.1.0.56",
@@ -227,6 +231,7 @@ class CxsConnection:
                 self._options = response.options
                 self.properties = properties
                 self._keepalive_task = asyncio.create_task(self._keepalive())
+                self._read_task = asyncio.create_task(self._read_loop())
                 return properties
         raise TendStreamError("Tend broker did not return a session")
 
@@ -237,10 +242,27 @@ class CxsConnection:
                 await self._send(CxsPacket(526, options=self._options))
         except asyncio.CancelledError:
             pass
-        except OSError:
+        except OSError, TendStreamError:
             _LOGGER.debug("Tend camera signaling keepalive ended")
-        except TendStreamError:
-            _LOGGER.debug("Tend camera signaling keepalive ended")
+
+    async def _read_loop(self) -> None:
+        """Own the socket after login so broker traffic never piles up unread."""
+        try:
+            while True:
+                packet, _ = await self._next(None)
+                for prefix, reply in self._replies:
+                    if not reply.done() and packet.body.startswith(prefix):
+                        reply.set_result(packet)
+                        break
+        except OSError, TendStreamError:
+            _LOGGER.debug("Tend camera signaling closed")
+        finally:
+            self._lost = True
+            for _, reply in self._replies:
+                if not reply.done():
+                    reply.set_exception(TendStreamError("Tend signaling closed"))
+            if self._on_lost is not None:
+                self._on_lost(self)
 
     async def command(self, command: str, destination: str, correlation: str | None = None) -> str:
         """Send a command to a camera through the broker."""
@@ -255,14 +277,22 @@ class CxsConnection:
         )
         return correlation
 
-    async def wait_for(self, prefix: bytes, wait_seconds: float = 15) -> CxsPacket:
-        """Wait for a matching camera response."""
-        deadline = time.monotonic() + wait_seconds
-        while time.monotonic() < deadline:
-            response, _ = await self._next(deadline - time.monotonic())
-            if response.body.startswith(prefix):
-                return response
-        raise TendStreamError("Tend camera offer timed out")
+    async def request(
+        self, command: str, destination: str, reply_prefix: bytes, wait_seconds: float = 15
+    ) -> tuple[str, CxsPacket]:
+        """Send a camera command and wait for the reply that starts with reply_prefix."""
+        reply: asyncio.Future[CxsPacket] = asyncio.get_running_loop().create_future()
+        entry = (reply_prefix, reply)
+        # Register before sending, so a fast reply cannot slip past the read loop.
+        self._replies.append(entry)
+        try:
+            correlation = await self.command(command, destination)
+            async with asyncio.timeout(wait_seconds):
+                return correlation, await reply
+        except TimeoutError as error:
+            raise TendStreamError("Tend camera did not reply in time") from error
+        finally:
+            self._replies.remove(entry)
 
     def close_transport(self) -> None:
         if self._writer is not None:
@@ -271,9 +301,12 @@ class CxsConnection:
         self._reader = None
 
     def close(self) -> None:
-        if self._keepalive_task is not None:
-            self._keepalive_task.cancel()
-            self._keepalive_task = None
+        self._on_lost = None
+        for task in (self._keepalive_task, self._read_task):
+            if task is not None:
+                task.cancel()
+        self._keepalive_task = None
+        self._read_task = None
         self.close_transport()
 
 
@@ -283,10 +316,14 @@ class TendCamera:
     destination: str
     aes_key: str
     local_ip: str
+    opener_serial: str = ""
 
 
 def parse_cameras(properties: dict[str, str]) -> list[TendCamera]:
-    """Read the camera capabilities supplied by the Tend broker."""
+    """Read the camera capabilities supplied by the Tend broker.
+
+    Each destination is "<account alias>:<camera MAC>"; GSN names the attached opener.
+    """
     cameras = []
     for line in properties.get("device-info-list", "").splitlines():
         destination, separator, capabilities = line.partition(",")
@@ -294,7 +331,15 @@ def parse_cameras(properties: dict[str, str]) -> list[TendCamera]:
             continue
         device_id = destination.split(":", 1)[0]
         raw = dict(item.split("=", 1) for item in capabilities.split("+") if "=" in item)
-        cameras.append(TendCamera(device_id, destination, raw.get("AES", ""), raw.get("LIP", "")))
+        cameras.append(
+            TendCamera(
+                device_id,
+                destination,
+                raw.get("AES", ""),
+                raw.get("LIP", ""),
+                raw.get("GSN", ""),
+            )
+        )
     return cameras
 
 
@@ -308,10 +353,11 @@ class VideoOffer:
 
 async def request_video(connection: CxsConnection, camera: TendCamera) -> VideoOffer:
     """Ask the camera for a Tend video session."""
-    correlation = await connection.command(
-        f"require-video-send|{camera.device_id}|9|", camera.destination
+    correlation, response = await connection.request(
+        f"require-video-send|{camera.device_id}|9|",
+        camera.destination,
+        b"accept-video-receive|",
     )
-    response = await connection.wait_for(b"accept-video-receive|")
     match = re.search(rb"rtp://([^:/]+):(\d+)", response.source)
     if match is None:
         raise TendStreamError("Tend video offer has no relay endpoint")
@@ -381,8 +427,6 @@ def decode_video_payload(payload: bytes, aes_key: str) -> list[bytes]:
             combined = _decrypt(aes_key, combined)
         except ValueError:
             return []
-        except UnicodeError:
-            return []
     records = []
     offset = 0
     while offset + 4 <= len(combined):
@@ -428,6 +472,7 @@ class VideoTransport:
         self.channels: list[_Channel] = []
         self.local_ip = ""
         self._relay_ip = ""
+        self._camera_ips = {camera.local_ip} if camera.local_ip else set[str]()
         self._connected = asyncio.Event()
         self._report_task: asyncio.Task[None] | None = None
         self._frame_number: int | None = None
@@ -536,10 +581,16 @@ class VideoTransport:
         if len(self.channels) < 2:
             return
         channel = self.channels[int(control)]
+        # Only the relay and the camera addresses it announced may set peers or send media.
+        if remote[0] != self._relay_ip and remote[0] not in self._camera_ips:
+            return
         if data[:4] == _SDNK_MAGIC and len(data) >= 20:
             kind = data[7]
             if kind == 2:
+                if remote[0] != self._relay_ip:
+                    return
                 peers = parse_peer_packet(data)
+                self._camera_ips.update(address for address, _ in peers)
                 private = [
                     peer
                     for peer in peers
@@ -672,7 +723,9 @@ class VideoTransport:
             self._cycles + self._max_seq,
             int(self._jitter) & 0xFFFFFFFF,
             self._last_sr,
-            int((time.monotonic() - self._last_sr_at) * 65536) if self._last_sr_at else 0,
+            min(int((time.monotonic() - self._last_sr_at) * 65536), 0xFFFFFFFF)
+            if self._last_sr_at
+            else 0,
         )
         return bytes(report)
 

@@ -217,3 +217,13 @@ async def test_camera_image_translates_http_errors(
 
     with pytest.raises(exception):
         await client.async_get_camera_image(CAMERA)
+
+
+async def test_camera_image_rejects_a_response_that_is_not_jpeg() -> None:
+    session = FakeSession(request_responses=[FakeResponse("", body=b'{"error":"camera-offline"}')])
+    auth = MagicMock(spec=MyQAuth)
+    auth.async_access_token = AsyncMock(return_value="access")
+    client = MyQClient(cast(ClientSession, session), auth)
+
+    with pytest.raises(MyQApiError):
+        await client.async_get_camera_image(CAMERA)
