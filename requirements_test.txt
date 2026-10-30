@@ -1,5 +1,5 @@
 mypy==2.3.0
 PyTurboJPEG==1.8.3
-pytest-homeassistant-custom-component==0.13.348
+pytest-homeassistant-custom-component==0.13.375
 python-semantic-release==10.6.1
 ruff==0.16.1

@@ -126,9 +126,10 @@ async def test_setup_adds_camera_only_for_doors_with_cameras(hass: HomeAssistant
     assert registry.async_get_entity_id("camera", DOMAIN, "door-2_camera") is None
     camera_entry = registry.async_get(camera_id)
     assert camera_entry is not None
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "door-1")})
+    assert camera_entry.device_id is not None
+    device = dr.async_get(hass).async_get(camera_entry.device_id)
     assert device is not None
-    assert camera_entry.device_id == device.id
+    assert (DOMAIN, "door-1") in device.identifiers
     state = hass.states.get(camera_id)
     assert state is not None
     assert state.state == "idle"

@@ -31,7 +31,7 @@ The sensor is on whenever the door is known to be not closed, including while it
 
 ## Requirements
 
-- Home Assistant 2026.7.4 or newer;
+- Home Assistant 2026.10.4 or newer;
 - a MyQ residential account with at least one connected garage-door opener.
 
 The initial release has been tested with a United States MyQ account. Reports
@@ -39,9 +39,20 @@ from other regions are welcome.
 
 ## Installation
 
-The integration can be installed through HACS as a custom repository.
+The integration can be installed as a custom repository through the
+Marketplace (Home Assistant 2026.11 and newer) or HACS (older versions).
 
 [![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bvdcode&repository=myq-home-assistant&category=integration)
+
+On Home Assistant 2026.11 and newer:
+
+1. Open **Settings → Marketplace**. Adding a custom repository requires a
+   GitHub connection.
+2. Select **Add from link** and enter
+   `https://github.com/bvdcode/myq-home-assistant`.
+3. Install **MyQ** and restart Home Assistant.
+
+On older versions with HACS:
 
 1. Open **HACS**.
 2. Select **Integrations**.
@@ -49,6 +60,9 @@ The integration can be installed through HACS as a custom repository.
 4. Add `https://github.com/bvdcode/myq-home-assistant` as an **Integration**
    repository.
 5. Install **MyQ** and restart Home Assistant.
+
+Existing HACS installations move to the Marketplace automatically when Home
+Assistant is updated to 2026.11.
 
 ## Configuration
 

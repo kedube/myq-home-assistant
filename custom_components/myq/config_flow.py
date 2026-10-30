@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
-import voluptuous as vol
+import probatio as vol
 from aiohttp import ClientError, ClientSession, CookieJar
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult

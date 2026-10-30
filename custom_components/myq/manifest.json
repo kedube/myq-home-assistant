@@ -1,6 +1,7 @@
 {
   "domain": "myq",
   "name": "MyQ",
+  "categories": ["blinds_curtains", "security_safety.cameras"],
   "codeowners": ["@bvdcode"],
   "config_flow": true,
   "documentation": "https://github.com/bvdcode/myq-home-assistant",
