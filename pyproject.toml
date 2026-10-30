@@ -19,6 +19,11 @@ warn_unreachable = true
 module = "pytest_homeassistant_custom_component.*"
 ignore_missing_imports = true
 
+# HA 2026.10 re-exports these names without __all__; remove once CI tests HA 2026.11.
+[[tool.mypy.overrides]]
+module = ["homeassistant.components.binary_sensor", "homeassistant.components.camera"]
+implicit_reexport = true
+
 [tool.semantic_release]
 allow_zero_version = true
 major_on_zero = false

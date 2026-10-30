@@ -1,6 +1,6 @@
 from typing import Final, TypedDict
 
-import voluptuous as vol
+import probatio as vol
 from homeassistant.helpers import selector
 
 from .const import CONF_MFA_METHOD, DEFAULT_MFA_METHOD, MFA_METHOD_EMAIL, MFA_METHOD_SMS
